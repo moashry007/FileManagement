@@ -1,20 +1,20 @@
 using FileManagementApi.Services;
+using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
+builder.Services.AddOpenApi(options =>
 {
-    c.SwaggerDoc("v1", new() { Title = "File Management API", Version = "v1" });
+    options.Info = new() { Title = "File Management API", Version = "v1" };
 });
 
 builder.Services.AddSingleton<IFileService, FileService>();
 
 var app = builder.Build();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+app.MapOpenApi();
+app.MapScalarApiReference();
 
 app.UseHttpsRedirection();
 app.UseAuthorization();
