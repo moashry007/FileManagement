@@ -6,7 +6,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddOpenApi(options =>
 {
-    options.Info = new() { Title = "File Management API", Version = "v1" };
+    options.AddDocumentTransformer((document, context, ct) =>
+    {
+        document.Info = new() { Title = "File Management API", Version = "v1" };
+        return Task.CompletedTask;
+    });
 });
 
 builder.Services.AddSingleton<IFileService, FileService>();
