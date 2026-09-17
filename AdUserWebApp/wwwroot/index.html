@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AD User Directory</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Active Directory User Directory</h1>
+    <div id="connectivity" class="status status-unknown">Checking connectivity&hellip;</div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search name, username, email, department&hellip;" />
+      <label class="checkbox">
+        <input id="includeDisabled" type="checkbox" />
+        Include disabled accounts
+      </label>
+      <button id="refresh">Refresh</button>
+      <button id="addUser" class="secondary">+ Add User</button>
+      <span id="asOf" class="as-of"></span>
+    </div>
+
+    <div id="message" class="message" hidden></div>
+
+    <table id="usersTable">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Display Name</th>
+          <th>Email</th>
+          <th>Department</th>
+          <th>Title</th>
+          <th>Phone</th>
+          <th>Mobile</th>
+          <th>Employee ID</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="usersBody"></tbody>
+    </table>
+
+    <div class="pager">
+      <button id="prevPage">&larr; Previous</button>
+      <span id="pageInfo"></span>
+      <button id="nextPage">Next &rarr;</button>
+    </div>
+  </main>
+
+  <dialog id="userDialog">
+    <form id="userForm">
+      <h2 id="userDialogTitle">Add User</h2>
+
+      <label>
+        Username (sAMAccountName)
+        <input name="samAccountName" required autocomplete="off" />
+      </label>
+      <div class="form-grid">
+        <label>First name<input name="firstName" required /></label>
+        <label>Surname<input name="surname" required /></label>
+        <label>Display name<input name="displayName" /></label>
+        <label>Email<input name="email" type="email" /></label>
+        <label>Phone<input name="telephone" /></label>
+        <label>Mobile<input name="mobile" /></label>
+        <label>Title<input name="jobTitle" /></label>
+        <label>Department<input name="department" /></label>
+        <label>Employee ID<input name="employeeId" /></label>
+      </div>
+
+      <div id="createOnlyFields">
+        <label>Initial password<input name="initialPassword" type="password" autocomplete="new-password" /></label>
+        <label class="checkbox"><input name="requirePasswordChangeAtNextLogon" type="checkbox" checked /> Require password change at next logon</label>
+        <label class="checkbox"><input name="enabled" type="checkbox" checked /> Enabled</label>
+      </div>
+
+      <div id="userDialogError" class="message" hidden></div>
+
+      <div class="dialog-actions">
+        <button type="button" id="userDialogCancel" class="secondary">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="passwordDialog">
+    <form id="passwordForm">
+      <h2>Reset Password &mdash; <span id="passwordDialogUser"></span></h2>
+      <label>New password<input name="newPassword" type="password" required minlength="8" autocomplete="new-password" /></label>
+      <label class="checkbox"><input name="requireChangeAtNextLogon" type="checkbox" checked /> Require change at next logon</label>
+
+      <div id="passwordDialogError" class="message" hidden></div>
+
+      <div class="dialog-actions">
+        <button type="button" id="passwordDialogCancel" class="secondary">Cancel</button>
+        <button type="submit">Reset Password</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
