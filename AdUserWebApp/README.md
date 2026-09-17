@@ -34,6 +34,11 @@ variables / user-secrets:
   account, and supply the password via a secret store
   (`dotnet user-secrets`, environment variable, Key Vault) — never commit it
   to `appsettings.json`.
+- `CacheMinutes` (default `10`) — how long a full directory export is reused.
+  Paging, searching, and toggling "include disabled" are served from this
+  in-memory cache instead of re-querying AD on every request; hit **Refresh**
+  in the UI to force a fresh read. Set to `0` to disable caching (not
+  recommended against a large domain — see below).
 
 ## Running
 
@@ -51,9 +56,29 @@ The API also exposes Scalar/OpenAPI docs at `/scalar`.
 ## Endpoints
 
 - `GET /api/adusers/probe` — connectivity check only, reads no user data.
-- `GET /api/adusers?q=&includeDisabled=&skip=&take=` — paged user list.
+- `GET /api/adusers?q=&includeDisabled=&skip=&take=&forceRefresh=` — paged
+  user list, served from the in-memory cache unless `forceRefresh=true`.
   Disabled accounts (`userAccountControl` bit `ADS_UF_ACCOUNTDISABLE`) are
-  excluded unless `includeDisabled=true` is passed explicitly.
+  excluded unless `includeDisabled=true` is passed explicitly. The response
+  includes `asOf` (when that snapshot was read from AD) so the UI can show
+  how fresh the data is.
+
+## Why the first load can be slow
+
+A full, uncached export walks every person/user object in the domain — for a
+large organization (thousands to tens of thousands of accounts) that single
+LDAP query can legitimately take tens of seconds to a couple of minutes, even
+though it completes in one continuous paged operation rather than one round
+trip per user. The **first** request after startup (or after the cache
+expires, or after hitting Refresh) pays that cost; every request after that,
+including every page turn, search keystroke, and disabled-accounts toggle, is
+served from the cache and returns near-instantly until it expires or you
+force a refresh. If the page looks stuck on "Loading…" for longer than a
+minute or two on a fresh start, check the server console for the
+`AD export in progress: N objects scanned` log line (emitted every 1000
+records) — if the count is climbing, it's working; if there's no such line at
+all, the bind itself is hanging or failing (check `/api/adusers/probe` and
+the server log for the actual exception).
 
 ## Data handling
 
@@ -66,18 +91,22 @@ for every account in the domain. Per the spec:
   organization-wide PII; don't expose it on an open/public network without
   authentication in front of it.
 
-## Not verified in this environment
+## Verification status
 
-This code was written against the spec's confirmed connection pattern but
-could not be built or run here: there is no .NET SDK and no Windows/AD
-connectivity in this sandbox. Before relying on it, on a domain-joined
-Windows machine run:
+This sandbox has no Windows and no line-of-sight to a real AD domain, so the
+actual LDAP bind and enumeration can't be exercised here. What *was* verified
+in this sandbox (via a temporary net8.0 retarget and a stubbed directory
+service, both reverted before committing): the app builds, the web server
+starts, the static UI and API wiring work end-to-end, AD-unreachable errors
+degrade cleanly (503/502, no crash, no PII in logs), and the in-memory
+caching behaves correctly (repeat requests are served from cache; only
+`forceRefresh=true` or cache expiry triggers a new read).
 
+Still to confirm on a domain-joined Windows machine, per §1 of the spec:
 ```
 dotnet restore
 dotnet build
 dotnet run --project AdUserWebApp
 ```
-
-and confirm the probe endpoint reports a real `ConnectedServer`, per §1 of
-the spec, before pointing it at the full domain.
+Confirm `GET /api/adusers/probe` reports a real `ConnectedServer` before
+relying on the full user list.

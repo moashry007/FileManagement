@@ -1,8 +1,11 @@
 const PAGE_SIZE = 50;
+const REQUEST_TIMEOUT_MS = 3 * 60 * 1000; // A first-time (uncached) export of a large domain can take a while.
+const SLOW_LOAD_HINT_MS = 5000;
 
 const state = {
   skip: 0,
   total: 0,
+  forceRefresh: false,
 };
 
 const el = {
@@ -15,6 +18,7 @@ const el = {
   prevPage: document.getElementById("prevPage"),
   nextPage: document.getElementById("nextPage"),
   pageInfo: document.getElementById("pageInfo"),
+  asOf: document.getElementById("asOf"),
 };
 
 function escapeHtml(value) {
@@ -56,6 +60,10 @@ async function loadUsers() {
   showMessage("");
   el.body.innerHTML = `<tr class="empty-row"><td colspan="9">Loading&hellip;</td></tr>`;
 
+  const slowHintTimer = setTimeout(() => {
+    el.body.innerHTML = `<tr class="empty-row"><td colspan="9">Still loading&hellip; the first read of a large directory can take a minute or two. Later loads are served from cache and are fast.</td></tr>`;
+  }, SLOW_LOAD_HINT_MS);
+
   const params = new URLSearchParams({
     skip: String(state.skip),
     take: String(PAGE_SIZE),
@@ -63,9 +71,14 @@ async function loadUsers() {
   });
   const q = el.search.value.trim();
   if (q) params.set("q", q);
+  if (state.forceRefresh) params.set("forceRefresh", "true");
+  state.forceRefresh = false;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const res = await fetch(`/api/adusers?${params.toString()}`);
+    const res = await fetch(`/api/adusers?${params.toString()}`, { signal: controller.signal });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
       throw new Error(errBody.error || `Request failed (${res.status})`);
@@ -74,11 +87,28 @@ async function loadUsers() {
     state.total = data.total;
     renderRows(data.users);
     renderPager();
+    renderAsOf(data.asOf);
   } catch (err) {
     el.body.innerHTML = "";
-    showMessage(err.message || "Failed to load users.");
+    if (err.name === "AbortError") {
+      showMessage("The directory read timed out. The domain may be very large, or AD may be unreachable — check the server console log for progress.");
+    } else {
+      showMessage(err.message || "Failed to load users.");
+    }
     renderPager();
+  } finally {
+    clearTimeout(slowHintTimer);
+    clearTimeout(timeoutId);
   }
+}
+
+function renderAsOf(asOf) {
+  if (!el.asOf) return;
+  if (!asOf) {
+    el.asOf.textContent = "";
+    return;
+  }
+  el.asOf.textContent = `Data as of ${new Date(asOf).toLocaleTimeString()}`;
 }
 
 function renderRows(users) {
@@ -126,6 +156,7 @@ el.includeDisabled.addEventListener("change", () => {
 
 el.refresh.addEventListener("click", () => {
   state.skip = 0;
+  state.forceRefresh = true;
   checkConnectivity();
   loadUsers();
 });

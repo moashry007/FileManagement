@@ -30,10 +30,55 @@ public sealed class AdUserDirectoryService : IAdUserDirectoryService
     private readonly LdapOptions _options;
     private readonly ILogger<AdUserDirectoryService> _logger;
 
+    private readonly object _cacheLock = new();
+    private AdUserSnapshot? _activeOnlyCache;
+    private AdUserSnapshot? _includingDisabledCache;
+    private DateTimeOffset _activeOnlyCacheExpiresAt;
+    private DateTimeOffset _includingDisabledCacheExpiresAt;
+
     public AdUserDirectoryService(IOptions<LdapOptions> options, ILogger<AdUserDirectoryService> logger)
     {
         _options = options.Value;
         _logger = logger;
+    }
+
+    public AdUserSnapshot GetUsers(bool includeDisabled = false, bool forceRefresh = false)
+    {
+        var cacheDuration = TimeSpan.FromMinutes(Math.Max(_options.CacheMinutes, 0));
+
+        lock (_cacheLock)
+        {
+            var cached = includeDisabled ? _includingDisabledCache : _activeOnlyCache;
+            var expiresAt = includeDisabled ? _includingDisabledCacheExpiresAt : _activeOnlyCacheExpiresAt;
+
+            if (!forceRefresh && cacheDuration > TimeSpan.Zero && cached is not null && DateTimeOffset.UtcNow < expiresAt)
+            {
+                _logger.LogInformation("Serving {Count} users from cache (as of {AsOf})", cached.Users.Count, cached.AsOf);
+                return cached;
+            }
+        }
+
+        var snapshot = new AdUserSnapshot
+        {
+            Users = FetchAllUsersFromDirectory(includeDisabled).ToList(),
+            AsOf = DateTimeOffset.UtcNow,
+        };
+
+        lock (_cacheLock)
+        {
+            if (includeDisabled)
+            {
+                _includingDisabledCache = snapshot;
+                _includingDisabledCacheExpiresAt = snapshot.AsOf + cacheDuration;
+            }
+            else
+            {
+                _activeOnlyCache = snapshot;
+                _activeOnlyCacheExpiresAt = snapshot.AsOf + cacheDuration;
+            }
+        }
+
+        return snapshot;
     }
 
     public AdConnectivityStatus Probe()
@@ -69,7 +114,7 @@ public sealed class AdUserDirectoryService : IAdUserDirectoryService
         }
     }
 
-    public IEnumerable<AdUserRecord> GetAllUsers(bool includeDisabled = false)
+    private IEnumerable<AdUserRecord> FetchAllUsersFromDirectory(bool includeDisabled)
     {
         if (string.IsNullOrWhiteSpace(_options.Domain))
             throw new InvalidOperationException("Ldap:Domain is not configured.");

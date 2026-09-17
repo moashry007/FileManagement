@@ -40,14 +40,16 @@ public class AdUsersController : ControllerBase
         [FromQuery] bool includeDisabled = false,
         [FromQuery] string? q = null,
         [FromQuery] int skip = 0,
-        [FromQuery] int take = 200)
+        [FromQuery] int take = 200,
+        [FromQuery] bool forceRefresh = false)
     {
         skip = Math.Max(skip, 0);
         take = Math.Clamp(take, 1, 1000);
 
         try
         {
-            IEnumerable<AdUserRecord> users = _directoryService.GetAllUsers(includeDisabled);
+            var snapshot = _directoryService.GetUsers(includeDisabled, forceRefresh);
+            IEnumerable<AdUserRecord> users = snapshot.Users;
 
             if (!string.IsNullOrWhiteSpace(q))
             {
@@ -58,14 +60,15 @@ public class AdUsersController : ControllerBase
                     u.Department.Contains(q, StringComparison.OrdinalIgnoreCase));
             }
 
-            var materialized = users.ToList();
-            var page = materialized.Skip(skip).Take(take).ToList();
+            var filtered = users.ToList();
+            var page = filtered.Skip(skip).Take(take).ToList();
 
             return Ok(new
             {
-                total = materialized.Count,
+                total = filtered.Count,
                 skip,
                 take,
+                asOf = snapshot.AsOf,
                 users = page,
             });
         }

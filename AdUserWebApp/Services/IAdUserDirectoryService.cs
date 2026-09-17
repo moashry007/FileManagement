@@ -12,7 +12,9 @@ public interface IAdUserDirectoryService
     AdConnectivityStatus Probe();
 
     /// <summary>
-    /// Enumerates every person/user object in the configured domain or container.
+    /// Returns every person/user object in the configured domain or container. Results are
+    /// cached in memory (see <see cref="Options.LdapOptions.CacheMinutes"/>) so that paging,
+    /// searching, or repeat page loads don't each re-walk the whole directory.
     /// </summary>
-    IEnumerable<AdUserRecord> GetAllUsers(bool includeDisabled = false);
+    AdUserSnapshot GetUsers(bool includeDisabled = false, bool forceRefresh = false);
 }
