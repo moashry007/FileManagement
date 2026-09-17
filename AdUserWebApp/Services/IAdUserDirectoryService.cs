@@ -17,4 +17,28 @@ public interface IAdUserDirectoryService
     /// searching, or repeat page loads don't each re-walk the whole directory.
     /// </summary>
     AdUserSnapshot GetUsers(bool includeDisabled = false, bool forceRefresh = false);
+
+    /// <summary>
+    /// Updates the profile attributes of an existing user. Never touches account state or
+    /// credentials. Throws <see cref="KeyNotFoundException"/> if no such account exists.
+    /// </summary>
+    AdUserRecord UpdateUser(string samAccountName, AdUserUpdateRequest request);
+
+    /// <summary>
+    /// Enables or disables an existing account (the userAccountControl ADS_UF_ACCOUNTDISABLE
+    /// bit). Throws <see cref="KeyNotFoundException"/> if no such account exists.
+    /// </summary>
+    AdUserRecord SetAccountEnabled(string samAccountName, bool enabled);
+
+    /// <summary>
+    /// Resets an existing user's password. Throws <see cref="KeyNotFoundException"/> if no
+    /// such account exists. Never logs the password.
+    /// </summary>
+    void ResetPassword(string samAccountName, AdPasswordResetRequest request);
+
+    /// <summary>
+    /// Creates a new user account. Throws <see cref="InvalidOperationException"/> if the
+    /// sAMAccountName is already taken.
+    /// </summary>
+    AdUserRecord CreateUser(AdUserCreateRequest request);
 }

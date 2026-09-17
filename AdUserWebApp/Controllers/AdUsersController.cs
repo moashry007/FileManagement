@@ -80,4 +80,98 @@ public class AdUsersController : ControllerBase
                 new { error = "Failed to read users from Active Directory. See server logs for details." });
         }
     }
+
+    /// <summary>
+    /// Updates an existing user's profile attributes (name, contact info, title, department,
+    /// employee ID). Does not touch account state or credentials.
+    /// </summary>
+    [HttpPatch("{samAccountName}")]
+    [ProducesResponseType(typeof(AdUserRecord), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status502BadGateway)]
+    public IActionResult UpdateUser(string samAccountName, [FromBody] AdUserUpdateRequest request) =>
+        ExecuteWrite(() => _directoryService.UpdateUser(samAccountName, request), "update user", samAccountName);
+
+    /// <summary>
+    /// Enables a previously disabled account.
+    /// </summary>
+    [HttpPost("{samAccountName}/enable")]
+    [ProducesResponseType(typeof(AdUserRecord), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status502BadGateway)]
+    public IActionResult EnableUser(string samAccountName) =>
+        ExecuteWrite(() => _directoryService.SetAccountEnabled(samAccountName, enabled: true), "enable account", samAccountName);
+
+    /// <summary>
+    /// Disables an account. The account is not deleted and can be re-enabled.
+    /// </summary>
+    [HttpPost("{samAccountName}/disable")]
+    [ProducesResponseType(typeof(AdUserRecord), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status502BadGateway)]
+    public IActionResult DisableUser(string samAccountName) =>
+        ExecuteWrite(() => _directoryService.SetAccountEnabled(samAccountName, enabled: false), "disable account", samAccountName);
+
+    /// <summary>
+    /// Resets an existing user's password. The password is never logged.
+    /// </summary>
+    [HttpPost("{samAccountName}/reset-password")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status502BadGateway)]
+    public IActionResult ResetPassword(string samAccountName, [FromBody] AdPasswordResetRequest request) =>
+        ExecuteWrite<object?>(() =>
+        {
+            _directoryService.ResetPassword(samAccountName, request);
+            return null;
+        }, "reset password for", samAccountName);
+
+    /// <summary>
+    /// Creates a new AD user account.
+    /// </summary>
+    [HttpPost]
+    [ProducesResponseType(typeof(AdUserRecord), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status502BadGateway)]
+    public IActionResult CreateUser([FromBody] AdUserCreateRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SamAccountName) || string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.Surname))
+            return BadRequest(new { error = "SamAccountName, FirstName, and Surname are required." });
+
+        var result = ExecuteWrite(() => _directoryService.CreateUser(request), "create user", request.SamAccountName);
+        if (result is OkObjectResult ok)
+            return CreatedAtAction(nameof(GetUsers), null, ok.Value);
+
+        return result;
+    }
+
+    private IActionResult ExecuteWrite<T>(Func<T> action, string operationDescription, string samAccountName)
+    {
+        try
+        {
+            var value = action();
+            return value is null ? NoContent() : Ok(value);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            // Never log request bodies here - password resets and profile edits carry PII/secrets.
+            _logger.LogError(ex, "Failed to {Operation} {SamAccountName} in Active Directory.", operationDescription, samAccountName);
+            return StatusCode(StatusCodes.Status502BadGateway,
+                new { error = $"Failed to {operationDescription} in Active Directory. See server logs for details." });
+        }
+    }
 }

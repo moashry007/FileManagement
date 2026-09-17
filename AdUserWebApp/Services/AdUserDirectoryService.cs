@@ -168,9 +168,177 @@ public sealed class AdUserDirectoryService : IAdUserDirectoryService
     private PrincipalContext CreatePrincipalContext()
     {
         var credential = BuildCredential();
+        var container = string.IsNullOrWhiteSpace(_options.Container) ? null : _options.Container;
+
         return credential is null
-            ? new PrincipalContext(ContextType.Domain, _options.Domain)
-            : new PrincipalContext(ContextType.Domain, _options.Domain, credential.UserName, credential.Password);
+            ? new PrincipalContext(ContextType.Domain, _options.Domain, container)
+            : new PrincipalContext(ContextType.Domain, _options.Domain, container, credential.UserName, credential.Password);
+    }
+
+    private void InvalidateCache()
+    {
+        lock (_cacheLock)
+        {
+            _activeOnlyCacheExpiresAt = DateTimeOffset.MinValue;
+            _includingDisabledCacheExpiresAt = DateTimeOffset.MinValue;
+        }
+    }
+
+    private UserPrincipal FindUserOrThrow(PrincipalContext context, string samAccountName)
+    {
+        var user = UserPrincipal.FindByIdentity(context, IdentityType.SamAccountName, samAccountName);
+        if (user is null)
+            throw new KeyNotFoundException($"No AD user found with sAMAccountName '{samAccountName}'.");
+        return user;
+    }
+
+    public AdUserRecord UpdateUser(string samAccountName, AdUserUpdateRequest request)
+    {
+        using var context = CreatePrincipalContext();
+        using var user = FindUserOrThrow(context, samAccountName);
+        using var entry = (DirectoryEntry)user.GetUnderlyingObject();
+
+        SetAttribute(entry, "givenName", request.FirstName);
+        SetAttribute(entry, "sn", request.Surname);
+        SetAttribute(entry, "displayName", request.DisplayName);
+        SetAttribute(entry, "mail", request.Email);
+        SetAttribute(entry, "telephoneNumber", request.Telephone);
+        SetAttribute(entry, "mobile", request.Mobile);
+        SetAttribute(entry, "title", request.JobTitle);
+        SetAttribute(entry, "department", request.Department);
+        SetAttribute(entry, "employeeID", request.EmployeeId);
+        entry.CommitChanges();
+
+        // Log which fields changed, never the values themselves - they're PII.
+        _logger.LogInformation("Updated AD user {SamAccountName}", samAccountName);
+        InvalidateCache();
+
+        return MapFromEntry(entry);
+    }
+
+    public AdUserRecord SetAccountEnabled(string samAccountName, bool enabled)
+    {
+        using var context = CreatePrincipalContext();
+        using var user = FindUserOrThrow(context, samAccountName);
+
+        user.Enabled = enabled;
+        user.Save();
+
+        _logger.LogInformation("{Action} AD account {SamAccountName}", enabled ? "Enabled" : "Disabled", samAccountName);
+        InvalidateCache();
+
+        using var entry = (DirectoryEntry)user.GetUnderlyingObject();
+        return MapFromEntry(entry);
+    }
+
+    public void ResetPassword(string samAccountName, AdPasswordResetRequest request)
+    {
+        if (string.IsNullOrEmpty(request.NewPassword))
+            throw new ArgumentException("NewPassword must not be empty.", nameof(request));
+
+        using var context = CreatePrincipalContext();
+        using var user = FindUserOrThrow(context, samAccountName);
+
+        user.SetPassword(request.NewPassword);
+        if (request.RequireChangeAtNextLogon)
+        {
+            user.ExpirePasswordNow();
+            user.Save();
+        }
+
+        // Never log the password itself.
+        _logger.LogInformation("Password reset for AD account {SamAccountName}", samAccountName);
+        InvalidateCache();
+    }
+
+    public AdUserRecord CreateUser(AdUserCreateRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SamAccountName))
+            throw new ArgumentException("SamAccountName is required.", nameof(request));
+
+        using var context = CreatePrincipalContext();
+
+        using (var existing = UserPrincipal.FindByIdentity(context, IdentityType.SamAccountName, request.SamAccountName))
+        {
+            if (existing is not null)
+                throw new InvalidOperationException($"An AD user with sAMAccountName '{request.SamAccountName}' already exists.");
+        }
+
+        var hasPassword = !string.IsNullOrEmpty(request.InitialPassword);
+
+        using var newUser = new UserPrincipal(context)
+        {
+            SamAccountName = request.SamAccountName,
+            GivenName = request.FirstName,
+            Surname = request.Surname,
+            DisplayName = string.IsNullOrWhiteSpace(request.DisplayName)
+                ? $"{request.FirstName} {request.Surname}".Trim()
+                : request.DisplayName,
+            EmailAddress = request.Email,
+            // AD refuses to enable an account that has no usable password.
+            Enabled = hasPassword && request.Enabled,
+        };
+
+        newUser.Save();
+
+        if (hasPassword)
+        {
+            newUser.SetPassword(request.InitialPassword!);
+            if (request.RequirePasswordChangeAtNextLogon)
+                newUser.ExpirePasswordNow();
+            newUser.Save();
+        }
+
+        using var entry = (DirectoryEntry)newUser.GetUnderlyingObject();
+        SetAttribute(entry, "telephoneNumber", request.Telephone);
+        SetAttribute(entry, "mobile", request.Mobile);
+        SetAttribute(entry, "title", request.JobTitle);
+        SetAttribute(entry, "department", request.Department);
+        SetAttribute(entry, "employeeID", request.EmployeeId);
+        entry.CommitChanges();
+
+        _logger.LogInformation("Created AD user {SamAccountName}", request.SamAccountName);
+        InvalidateCache();
+
+        return MapFromEntry(entry);
+    }
+
+    private static void SetAttribute(DirectoryEntry entry, string attribute, string? value)
+    {
+        if (value is null)
+            return; // Not provided: leave the attribute unchanged.
+
+        if (value.Length == 0)
+        {
+            if (entry.Properties.Contains(attribute))
+                entry.Properties[attribute].Clear();
+        }
+        else
+        {
+            entry.Properties[attribute].Value = value;
+        }
+    }
+
+    private static AdUserRecord MapFromEntry(DirectoryEntry entry)
+    {
+        string Get(string name) => entry.Properties.Contains(name) ? entry.Properties[name][0]?.ToString() ?? "" : "";
+        var userAccountControl = entry.Properties.Contains("userAccountControl") ? (int)entry.Properties["userAccountControl"][0]! : 0;
+
+        return new AdUserRecord
+        {
+            SamAccountName = Get("sAMAccountName"),
+            DisplayName = Get("displayName"),
+            FirstName = Get("givenName"),
+            Surname = Get("sn"),
+            Email = Get("mail"),
+            Telephone = Get("telephoneNumber"),
+            Mobile = Get("mobile"),
+            EmployeeId = Get("employeeID"),
+            JobTitle = Get("title"),
+            Department = Get("department"),
+            DistinguishedName = Get("distinguishedName"),
+            IsDisabled = (userAccountControl & AdsUfAccountDisable) != 0,
+        };
     }
 
     private string BuildLdapPath()
