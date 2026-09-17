@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AD User Directory</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Active Directory User Directory</h1>
+    <div id="connectivity" class="status status-unknown">Checking connectivity&hellip;</div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search name, username, email, department&hellip;" />
+      <label class="checkbox">
+        <input id="includeDisabled" type="checkbox" />
+        Include disabled accounts
+      </label>
+      <button id="refresh">Refresh</button>
+    </div>
+
+    <div id="message" class="message" hidden></div>
+
+    <table id="usersTable">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Display Name</th>
+          <th>Email</th>
+          <th>Department</th>
+          <th>Title</th>
+          <th>Phone</th>
+          <th>Mobile</th>
+          <th>Employee ID</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="usersBody"></tbody>
+    </table>
+
+    <div class="pager">
+      <button id="prevPage">&larr; Previous</button>
+      <span id="pageInfo"></span>
+      <button id="nextPage">Next &rarr;</button>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
