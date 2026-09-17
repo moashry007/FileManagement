@@ -15,7 +15,10 @@ builder.Services.AddOpenApi(options =>
 });
 
 builder.Services.Configure<LdapOptions>(builder.Configuration.GetSection(LdapOptions.SectionName));
+
+#pragma warning disable CA1416 // AdUserDirectoryService is Windows-only by design; see its [SupportedOSPlatform("windows")].
 builder.Services.AddSingleton<IAdUserDirectoryService, AdUserDirectoryService>();
+#pragma warning restore CA1416
 
 var app = builder.Build();
 

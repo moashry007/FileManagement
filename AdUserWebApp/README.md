@@ -7,8 +7,17 @@ create new accounts, all from a browser UI. The read path is built from
 that spec — see **Security warning** below before enabling them.
 
 **Windows only** — `System.DirectoryServices` requires Windows, so this project
-targets `net10.0-windows` and must run on a machine that is domain-joined to (or
-has network line-of-sight to) the target AD domain.
+must run on a machine that is domain-joined to (or has network line-of-sight
+to) the target AD domain. It targets plain `net10.0` (not `net10.0-windows`):
+combining an ASP.NET Core Web SDK project with a `-windows`-suffixed TFM is
+known to make Visual Studio's Web Tools throw `An element with the same key
+but a different value already exists. Key:
+'Microsoft.WebTools.ProjectSystem.WebServer.SelfHostWebServer'` when starting
+the debugger. Windows-only APIs are instead scoped with
+`[SupportedOSPlatform("windows")]` on `AdUserDirectoryService` (and a scoped
+`#pragma warning disable CA1416` around its one DI registration in
+`Program.cs`), which was the spec's explicitly-sanctioned alternative to the
+`-windows` TFM.
 
 ## ⚠️ Security warning: this app currently has no authentication
 
